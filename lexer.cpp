@@ -1,39 +1,33 @@
+//  lexer.cpp - Lexer for the Kaleidoscope language
+
+#include "lexer.h"
+
 #include <iostream>
 #include <string>
 
-// Lexer returns 0-255 if unknown character (i.e. returns ASCII), otherwise negative values are meaningful
+namespace {
+  static std::string IdentifierStr; // Filled in if TOK_IDENTIFIER
+  static double NumVal;             // Filled in if TOK_NUMBER
 
-enum LexerError {
-  LEXERR_MALFORMED_NUMBER = 1,
+  enum LexerError {
+    LEXERR_MALFORMED_NUMBER = 1,
 
-};
+  };
 
-static std::string DEBUG_MESSAGES[] = {
-  "Malformed number",
-};
+  const std::string DEBUG_MESSAGES[] = {
+    "Malformed number",
+  };
 
-static int debugReturn(LexerError lexerError) {
-  std::cerr << "Lexer error: " << DEBUG_MESSAGES[lexerError - 1] << std::endl;
-  return lexerError;
-}
+  int debugReturn(LexerError lexerError) {
+    std::cerr << "Lexer error: " << DEBUG_MESSAGES[lexerError - 1] << std::endl;
+    return lexerError;
+  }
+} // namespace
 
-enum Token {
-  TOK_EOF = -1,
 
-  // commands
-  TOK_DEF = -2,
-  TOK_EXTERN = -3,
+namespace lexer {
 
-  // primary
-  TOK_IDENTIFIER = -4,
-  TOK_NUMBER = -5,
-  TOK_LEXERR = -6,
-};
-
-static std::string IdentifierStr; // Filled in if TOK_IDENTIFIER
-static double NumVal;             // Filled in if TOK_NUMBER
-
-static int gettok() {
+int gettok() {
   static int LastChar = ' ';      // !STATIC! always the next unparsed character.
 
   // Whitespace: [ \t\n]*
@@ -78,4 +72,7 @@ static int gettok() {
   // Return ASCII otherwise for semantic parsing
   int ThisChar = LastChar;
   LastChar = getchar();
+  return ThisChar;
 }
+  
+} // namespace lexer
