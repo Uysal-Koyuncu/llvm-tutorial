@@ -45,7 +45,7 @@ static int gettok() {
 
   // Identifier: [a-zA-Z][a-zA-Z0-9]*
   if (isalpha(LastChar)) {
-    for (IdentifierStr = LastChar; isalnum(LastChar); LastChar = getchar()) {
+    for (IdentifierStr = ""; isalnum(LastChar); LastChar = getchar()) {
       IdentifierStr += LastChar;
     }
 
@@ -362,11 +362,38 @@ static std::unique_ptr<FunctionAST> parseTopLevelExpr() {
 }
 
 // TODO: add error recovery "Handlexxx" functions
+static void handleDefinition() {
+  if (parseDefinition()) {
+    std::cerr << "Parsed a function definition." << std::endl;
+  }
+  else {
+    getNextToken();
+  }
+}
+
+static void handleExtern() {
+  if (parseExtern()) {
+    std::cerr << "Parsed an extern." << std::endl;
+  }
+  else {
+    getNextToken();
+  }
+}
+
+static void handleTopLevelExpression() {
+  if (parseTopLevelExpr()) {
+    std::cerr << "Parsed a top-level expr." << std::endl;
+  }
+  else {
+    getNextToken();
+  }
+}
+
 
 // Main driver
 static void mainLoop() {
   while (true) {
-    std::cout << "Ready > ";
+    std::cout << "Ready > " << std::flush;
     switch (CurTok) {
       case TOK_EOF:
         return;
@@ -375,14 +402,14 @@ static void mainLoop() {
         getNextToken();
         break;
       case TOK_DEF:
-        parseDefinition();
+        handleDefinition();
         break;
       case TOK_EXTERN:
-        parseExtern();
+        handleExtern();
         break;
       default:
         // CurTok was set to... default value?
-        parseTopLevelExpr();
+        handleTopLevelExpression();
         break;
     }
   }
@@ -398,8 +425,10 @@ int main() {
   BinopPrecedence['/'] = 40;
 
   // prime the first token
-  std::cout << "Ready > ";
+  std::cout << "Ready > " << std::flush;
   getNextToken();
 
   mainLoop();
+
+  return 0;
 }
