@@ -1,6 +1,7 @@
 // oneFiler.cpp
 
 #include <iostream>
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
@@ -162,7 +163,7 @@ std::unique_ptr<PrototypeAST> logErrorPrototype(const char *str) {
   return nullptr;
 }
 
-static int CurTok;
+static int CurTok = 0;
 static int getNextToken() {
   CurTok = gettok();    // get the next token from the lexer
   return CurTok;
@@ -178,6 +179,8 @@ static std::unique_ptr<ExprAST> parseNumberExpr() {
   getNextToken();
   return std::move(result);
 }
+
+static std::unique_ptr<ExprAST> parseExpression();   // forward declaration
 
 // Parentheses: '(' <expression> ')'
 // makes sure the parentheses are respected first
@@ -209,7 +212,7 @@ static std::unique_ptr<ExprAST> parseIdentifierExpr() {
   std::vector<std::unique_ptr<ExprAST>> args;
   if (CurTok != ')') {
     while (true) {
-      if (auto arg = ParseExpression()) {
+      if (auto arg = parseExpression()) {
         args.push_back(std::move(arg)); // consume the argument
       }
       else {
@@ -222,10 +225,10 @@ static std::unique_ptr<ExprAST> parseIdentifierExpr() {
         return logError("Expected ')' or ',' in argument list");
       getNextToken();  // consume ','; move to next argument in function call
     }
-
-    getNextToken();  // consume ')'
-    return std::make_unique<CallExprAST>(idName, std::move(args));
   }
+
+  getNextToken();  // consume ')'
+  return std::make_unique<CallExprAST>(idName, std::move(args));
 }
 
 // Helper caser to unify the Unit Parsing Functions
@@ -256,20 +259,6 @@ static int getTokPrecedence() {
   return BinopPrecedence[CurTok];
 }
 
-// Binary Expression Parsing: see 
-// expression ::= primary [binoprhs]
-/*
-  comment: "Consider, for example, the expression “a+b+(c+d)*e*f+g”. Operator precedence parsing considers this as a stream of primary expressions separated by binary operators. As such, it will first parse the leading primary expression “a”, then it will see the pairs [+, b] [+, (c+d)] [*, e] [*, f] and [+, g]. Note that because parentheses are primary expressions, the binary expression parser doesn’t need to worry about nested subexpressions like (c+d) at all."
-*/
-// "parentheses are primary expressions".
-static std::unique_ptr<ExprAST> parseExpression() {
-  auto lhs = parsePrimary();
-  if (!lhs)
-    return nullptr;
-  
-  return parseBinOpRHS(0, std::move(lhs));
-}
-
 // TODO: compile a better BNF for entire code
 // binoprhs ::= (<binop> primary)*
 // TODO: I feel this one is a bit different from the others
@@ -292,8 +281,8 @@ static std::unique_ptr<ExprAST> parseBinOpRHS(int exprPrec, std::unique_ptr<Expr
       return nullptr;
     
     int nextPrec = getTokPrecedence();    // the token was updated in parsePrimary()
-    if (tokProc < nextProc) {
-      rhs = parseBinOpRHS(TokPrec + 1, std::move(rhs)); // why 1? we are, like, recording the current level of precedence. Quite like a stack. Like a curr_high. The next time this falls below the TokPrec + 1, we know the higher-precedence expression has been fully parsed.
+    if (tokPrec < nextPrec) {
+      rhs = parseBinOpRHS(tokPrec + 1, std::move(rhs)); // why 1? we are, like, recording the current level of precedence. Quite like a stack. Like a curr_high. The next time this falls below the TokPrec + 1, we know the higher-precedence expression has been fully parsed.
       if (!rhs)
         return nullptr;
     }
@@ -302,7 +291,102 @@ static std::unique_ptr<ExprAST> parseBinOpRHS(int exprPrec, std::unique_ptr<Expr
   }
 }
 
+// Binary Expression Parsing: see 
+// expression ::= primary [binoprhs]
+/*
+  comment: "Consider, for example, the expression “a+b+(c+d)*e*f+g”. Operator precedence parsing considers this as a stream of primary expressions separated by binary operators. As such, it will first parse the leading primary expression “a”, then it will see the pairs [+, b] [+, (c+d)] [*, e] [*, f] and [+, g]. Note that because parentheses are primary expressions, the binary expression parser doesn’t need to worry about nested subexpressions like (c+d) at all."
+*/
+// "parentheses are primary expressions".
+static std::unique_ptr<ExprAST> parseExpression() {
+  auto lhs = parsePrimary();
+  if (!lhs)
+    return nullptr;
+  
+  return parseBinOpRHS(0, std::move(lhs));
+}
+
 // Till 2.5 end; next: 2.6 - parsing prototypes, defs, externs.
+// function prototype:
+// prototype ::= id '(' id* ')'
+// TODO: where will this be called?
+static std::unique_ptr<PrototypeAST> parsePrototype() {
+  if (CurTok != TOK_IDENTIFIER)
+    return logErrorPrototype("Expected function name in prototype");
+
+  std::string fnName = IdentifierStr;
+  getNextToken();
+  if (CurTok != '(')
+    return logErrorPrototype("Expected '(' in prototype");
+  
+  std::vector<std::string> argNames;
+  while (getNextToken() == TOK_IDENTIFIER) {
+    argNames.push_back(IdentifierStr);
+  }
+  
+  if (CurTok != ')')
+    return logErrorPrototype("Expected ')' in prototype");
+  getNextToken();  // consume ')'
+
+  return std::make_unique<PrototypeAST>(fnName, std::move(argNames));
+}
+
+// definitions; externs;
+static std::unique_ptr<FunctionAST> parseDefinition() {
+  // guarantee to be 'def' - see the outermost casing
+  getNextToken();
+
+  auto proto = parsePrototype();
+  if (!proto)
+    return nullptr;
+  
+  if (auto e = parseExpression()) {
+    return std::make_unique<FunctionAST>(std::move(proto), std::move(e));
+  }
+  return nullptr;
+}
+
+static std::unique_ptr<PrototypeAST> parseExtern() {
+  getNextToken(); // consume 'extern'
+  return parsePrototype();
+}
+
+// top-level expressions: scripting (i.e. type in an expression, get the result, like python)
+// top ::= expression
+// the top-level expression is in fact a function with no name
+static std::unique_ptr<FunctionAST> parseTopLevelExpr() {
+  if (auto e = parseExpression()) {
+    auto proto = std::make_unique<PrototypeAST>("__kaleido_anon__", std::vector<std::string>());
+    return std::make_unique<FunctionAST>(std::move(proto), std::move(e));
+  }
+  return nullptr;
+}
+
+// TODO: add error recovery "Handlexxx" functions
+
+// Main driver
+static void mainLoop() {
+  while (true) {
+    std::cout << "Ready > ";
+    switch (CurTok) {
+      case TOK_EOF:
+        return;
+      case ';':
+        // top-level semicolons to separate expressions (or rather, to support reading multi-line expressions by not having this)
+        getNextToken();
+        break;
+      case TOK_DEF:
+        parseDefinition();
+        break;
+      case TOK_EXTERN:
+        parseExtern();
+        break;
+      default:
+        // CurTok was set to... default value?
+        parseTopLevelExpr();
+        break;
+    }
+  }
+}
 
 // dummy main
 int main() {
@@ -312,4 +396,10 @@ int main() {
   BinopPrecedence['-'] = 20;
   BinopPrecedence['*'] = 40;
   BinopPrecedence['/'] = 40;
+
+  // prime the first token
+  std::cout << "Ready > ";
+  getNextToken();
+
+  mainLoop();
 }
